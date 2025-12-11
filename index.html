@@ -1,0 +1,178 @@
+<!DOCTYPE html> 
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Control Temperaturas + Firebase</title>
+
+<style>
+    body { font-family: Arial; background: #0d0d0d; color: white; text-align: center; padding: 20px; }
+    .card { background: #1a1a1a; padding: 20px; margin: 20px auto; border-radius: 15px; width: 90%; max-width: 500px; box-shadow: 0 0 15px cyan; }
+    button { background: cyan; color: black; border: none; padding: 12px 20px; margin: 6px; font-size: 18px; border-radius: 10px; cursor: pointer; }
+    button:hover { background: #00b7ff; }
+    .manual-btns button { background: orange; }
+    .manual-btns button:hover { background: #ff9d00; }
+    .thermo-container { width: 80%; margin: 10px auto; background: #333; border-radius: 20px; height: 25px; overflow: hidden; border: 2px solid cyan; }
+    .thermo-bar { height: 100%; width: 0%; background: linear-gradient(90deg, blue, cyan, red); transition: width 1s ease-in-out; }
+    .actuador { font-size: 22px; margin: 10px 0; }
+    .on { color: #00ff88; font-weight: bold; }
+    .off { color: #ff4444; font-weight: bold; }
+    #ventilador-icon.on { animation: giro 1s linear infinite; }
+    @keyframes giro { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+    #calefactor-icon.on { color: red; text-shadow: 0 0 20px red; }
+</style>
+
+<!-- Firebase -->
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+
+</head>
+<body>
+
+<h1>CONTROL DE TEMPERATURAS + FIREBASE</h1>
+
+<div class="card">
+    <h2>CONFIGURACIÓN FIREBASE</h2>
+    <button onclick="initFirebase()">Conectar Firebase</button>
+    <p id="firebase-status">❌ No conectado</p>
+</div>
+
+<div class="card">
+    <h2>LECTURAS</h2>
+    <p>Sensor 1: <span id="t1">0</span> °C</p>
+    <div class="thermo-container"><div id="bar1" class="thermo-bar"></div></div>
+    <p>Sensor 2: <span id="t2">0</span> °C</p>
+    <div class="thermo-container"><div id="bar2" class="thermo-bar"></div></div>
+    <p>Sensor 3: <span id="t3">0</span> °C</p>
+    <div class="thermo-container"><div id="bar3" class="thermo-bar"></div></div>
+    <p>Sensor 4: <span id="t4">0</span> °C</p>
+    <div class="thermo-container"><div id="bar4" class="thermo-bar"></div></div>
+    <h3>Temperatura General: <span id="general">0</span> °C</h3>
+    <div class="thermo-container"><div id="barGeneral" class="thermo-bar"></div></div>
+    <h3>Modo Actual: <span id="modo">AUTO</span></h3>
+</div>
+
+<div class="card">
+    <h2>MODO</h2>
+    <button onclick="setModo('AUTO')">Automático</button>
+    <button onclick="setModo('MANUAL')">Manual</button>
+</div>
+
+<div class="card manual-btns">
+    <h2>CONTROL MANUAL</h2>
+    <button onclick="controlManual('ventilador', true)">Ventilador ON</button>
+    <button onclick="controlManual('ventilador', false)">Ventilador OFF</button><br><br>
+    <button onclick="controlManual('calefactor', true)">Calefactor ON</button>
+    <button onclick="controlManual('calefactor', false)">Calefactor OFF</button>
+</div>
+
+<div class="card">
+    <h2>ESTADO DE ACTUADORES</h2>
+    <p class="actuador">Ventilador: <span id="ventilador-icon" class="off">🌀</span> <span id="ventilador-estado" class="off">Apagado</span></p>
+    <p class="actuador">Calefactor: <span id="calefactor-icon" class="off">🔥</span> <span id="calefactor-estado" class="off">Apagado</span></p>
+</div>
+
+<script>
+// ---------- CONFIGURACIÓN FIREBASE ----------
+const firebaseConfig = {
+    apiKey: "AIzaSyD1tyjPlPmVHVBV7rLx2r8xp7u312_dLhY",
+    databaseURL: "https://alexis-b0eea-default-rtdb.firebaseio.com/",
+    projectId: "dummy"
+};
+
+let db;
+let modoActual = "AUTO";
+let manualAutorizado = false; // Inicialmente no autorizado
+const passwordManual = "1234"; // <-- Aquí define la contraseña deseada
+
+function initFirebase(){
+    firebase.initializeApp(firebaseConfig);
+    db = firebase.database();
+    document.getElementById("firebase-status").innerText = "✅ Conectado a Firebase";
+
+    db.ref("sensores").on("value", (snapshot) => {
+        const json = snapshot.val();
+        if(json) actualizarDatos(json);
+    });
+}
+
+// ---------- ACTUALIZAR DATOS ----------
+function actualizarDatos(json){
+    document.getElementById("t1").innerText = json.s1;
+    document.getElementById("t2").innerText = json.s2;
+    document.getElementById("t3").innerText = json.s3;
+    document.getElementById("t4").innerText = json.s4;
+    document.getElementById("general").innerText = json.general;
+    document.getElementById("modo").innerText = json.modo;
+
+    actualizarTermometro("bar1", json.s1);
+    actualizarTermometro("bar2", json.s2);
+    actualizarTermometro("bar3", json.s3);
+    actualizarTermometro("bar4", json.s4);
+    actualizarTermometro("barGeneral", json.general);
+
+    actualizarActuadores();
+}
+
+// ---------- TERMÓMETROS ----------
+function actualizarTermometro(id, temp){
+    let pct = Math.max(0, Math.min(100, temp));
+    document.getElementById(id).style.width = pct + "%";
+}
+
+// ---------- ACTUADORES ----------
+function actualizarActuadores(){
+    db.ref("estado").get().then((snapshot) => {
+        const data = snapshot.val();
+        if(!data) return;
+
+        const ventilador = document.getElementById("ventilador-icon");
+        const calefactor = document.getElementById("calefactor-icon");
+        const ventTxt = document.getElementById("ventilador-estado");
+        const calTxt = document.getElementById("calefactor-estado");
+
+        if(data.ventilador){
+            ventilador.classList.add("on"); ventilador.classList.remove("off");
+            ventTxt.innerText = "Encendido"; ventTxt.className = "on";
+        } else {
+            ventilador.classList.remove("on"); ventilador.classList.add("off");
+            ventTxt.innerText = "Apagado"; ventTxt.className = "off";
+        }
+
+        if(data.calefactor){
+            calefactor.classList.add("on"); calefactor.classList.remove("off");
+            calTxt.innerText = "Encendido"; calTxt.className = "on";
+        } else {
+            calefactor.classList.remove("on"); calefactor.classList.add("off");
+            calTxt.innerText = "Apagado"; calTxt.className = "off";
+        }
+    });
+}
+
+// ---------- MODO ----------
+function setModo(modo){
+    if(modo === "MANUAL"){
+        let pass = prompt("Ingrese la contraseña para activar el modo manual:");
+        if(pass !== passwordManual){
+            alert("Contraseña incorrecta. Acceso denegado.");
+            return;
+        } else {
+            manualAutorizado = true;
+        }
+    } else {
+        manualAutorizado = false;
+    }
+
+    modoActual = modo;
+    db.ref("/modo").set(modo);
+}
+
+// ---------- CONTROL MANUAL ----------
+function controlManual(actuador, estado){
+    if(!manualAutorizado) { alert("No autorizado"); return; }
+    db.ref("/manual/" + actuador).set(estado);
+}
+</script>
+
+</body>
+</html>
